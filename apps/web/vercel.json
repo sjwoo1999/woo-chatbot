@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "buildCommand": "pnpm -w i && pnpm --filter @woo/web build",
+  "installCommand": "pnpm install",
+  "framework": "nextjs",
+  "build": {
+    "env": {
+      "SERVER_URL": "${SERVER_URL}"
+    }
+  }
+}
