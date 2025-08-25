@@ -20,7 +20,10 @@ woo-chatbot/
 ## 빠른 시작
 ```bash
 pnpm i
-pnpm db:migrate
+# DB 기동
+docker compose up -d
+# (선택) 컨테이너 내부에서 SQL 마이그레이션 적용
+# docker exec -i woo-chatbot-db-1 psql -U postgres -d woo -f - < packages/db/migrations/0001_init.sql
 pnpm dev
 ```
 
@@ -36,53 +39,72 @@ pnpm dev
 - [x] PRD/IA/ERD/SAFETY/ARCHITECTURE 문서 작성
 - [x] pnpm 모노레포 구성(`pnpm-workspace.yaml`, 루트 `package.json` 스크립트)
 - [x] `packages/shared`: `ModelProvider` 인터페이스, 공용 타입 정의
-- [x] `packages/db`: Drizzle 스키마(`users/conversations/messages/documents/chunks/violations/telemetry_events`), 설정 파일
-- [x] `apps/server`: NestJS 부트스트랩, SSE 스트리밍 엔드포인트(`POST /chat/stream`), OpenAI Provider(스트리밍), Safety(규칙+Guard+예외 필터), `nest-cli.json`
-- [x] `apps/web`: Next.js 채팅 페이지(스트리밍 렌더), 백엔드 프록시(`/app/api/chat/route.ts`), Tailwind 설정 및 글로벌 스타일
-- [x] DevOps: `.env.example`, `docker-compose.yml`
+- [x] `packages/db`: 스키마 확정 및 실제 마이그레이션(0001)
+  - [x] `chunks.embedding vector(1536)` 컬럼
+  - [x] IVFFlat 인덱스(`vector_cosine_ops`, lists=100)
+  - [x] FK/인덱스(messages.conv_id, chunks.doc_id 등)
+  - [x] 소프트 삭제(`deleted_at`) 컬럼 추가
+- [x] `apps/server`: SSE 스트리밍(`POST /chat/stream`), OpenAI Provider, Safety(Guard/ExceptionFilter)
+- [x] RAG 인제스트(최소 동작)
+  - [x] `POST /rag/upload`(.md/.txt 우선), `POST /rag/ingest`(본문 직접)
+  - [x] 청킹(800±200, overlap 100), OpenAI 임베딩 배치, 청크 upsert
+- [x] 검색 + 프롬프트 합성(최소)
+  - [x] `knowledgeBase` 토글 시 상위 청크 6개 검색 → `retrieved_knowledge` 섹션 주입
+  - [x] 응답 스트림에 `sources` 도구 이벤트 포함
+- [x] 웹 안전/출처 UI(최소)
+  - [x] `<RefusalCard />`, `<SafetyNotice />`
+  - [x] `<SourceChips />`, `<SourcePanel />`
+  - [x] `<CodeBlock />` 하이라이트 + XSS sanitize + 복사 버튼
+- [x] 텔레메트리(기본 서비스)
+  - [x] `TelemetryService.logEvent()` 추가 (미들웨어 연동은 후속)
+- [x] 테스트
+  - [x] 단위: Safety 6케이스, RAG 청킹 1케이스
+  - [x] 통합: `/chat/stream` placeholder 2케이스
+- [x] DevOps: `.env.example`(EMBEDDING_MODEL/DIM/UPLOAD_DIR 추가), `docker-compose.yml`
+- [x] 브랜치/PR: `feat/m1-rag-safety-telemetry` 푸시 완료 ([PR 생성 링크](https://github.com/sjwoo1999/woo-chatbot/pull/new/feat/m1-rag-safety-telemetry))
 
-## 남은 태스크
-### 기능
-- [ ] RAG 인제스트 파이프라인: 업로드 → 추출 → 청크 → 임베딩 → pgvector 업서트(백엔드 API/워커)
-- [ ] 검색/프롬프트 합성: Top-k/MMR, 시스템 프롬프트에 출처/안전 지침 주입
-- [ ] 출처 배지 UI: 문서명/페이지/청크 링크, 우측 패널 하이라이트
-- [ ] 코드블록 UX: 언어 감지, 복사 버튼, 줄 번호 토글
-- [ ] 거절 템플릿 UI: 정치/위험 차단, 자문 경고, PII 안내 표시
-- [ ] 모델 스위치: Anthropic/Ollama/vLLM Provider 추가 및 ENV 스위칭
+## 남은 태스크 (우선순위/담당)
+### 기능/RAG
+- [ ] [P1][@backend] 쿼리 확장 규칙(동의어 확장) 고도화/옵션화
+- [ ] [P1][@backend] 하이브리드 검색 고도화(MMR, 태그/제목 필터)
+- [ ] [P1][@backend] 업로드 파서: `.pdf` 추출기 구현, 대용량 배치/리트라이
+
+### 텔레메트리/보안
+- [ ] [P0][@backend] 요청-응답 미들웨어로 latency/차단/툴 사용 로깅
+- [ ] [P1][@backend] 토큰 사용량 수집(Provider 메타) 및 `telemetry_events` 저장
+- [ ] [P0][@backend] 입력 DTO 검증(Zod/Nest Pipe), 레이트리밋, CORS 강화
 
 ### 데이터베이스/마이그레이션
-- [ ] Drizzle 마이그레이션 생성/적용 스크립트 정비(`db:migrate` 실제 마이그레이션 추가)
-- [ ] `chunks.embedding` 벡터 인덱스(GiST/IVFFlat) 생성 마이그레이션
-- [ ] FK/인덱스 보강 및 소프트 삭제 전략 검토
+- [ ] [P1][@db] Drizzle migrate 스크립트 정비(`pnpm db:migrate` 실제 적용)
+- [ ] [P2][@db] 인덱스/쿼리 플랜 점검 및 파라미터 튜닝(lists/ef_search)
 
-### 관측성/보안
-- [ ] 텔레메트리/비용/지연 로깅 및 대시보드 연동
-- [ ] 입력 검증(DTO/Class-Validator or Zod), 레이트 리밋, 기본 CORS 정책 정교화
-- [ ] XSS/코드블록 Sanitization, SSE 연결 안정화(heartbeat, 재시도)
+### UI/UX
+- [ ] [P1][@web] 출처 미리보기 API 구현 및 `<SourcePanel />` 실데이터 연동
+- [ ] [P2][@web] 코드블록 줄 번호 토글/언어 자동 감지 고도화
+- [ ] [P2][@web] 거절 템플릿 문구/링크(비상 연락처 등) 보강
+
+### 모델/플러그 가능성
+- [ ] [P2][@backend] Provider 스위치: Anthropic/Ollama/vLLM 어댑터 추가/ENV 스위칭
 
 ### 테스트/품질
-- [ ] 단위 테스트: Safety 규칙/PII 마스킹, Provider 어댑터
-- [ ] E2E: 채팅 스트림, 안전 정책 회귀 20케이스 자동화
-- [ ] 커버리지 80% 이상, ESLint/Prettier 설정 추가
-
-### 설정/페이지
-- [ ] 설정 페이지: 모델/토큰/온도/정책 토글 UI
-- [ ] 로그/리포트 페이지: 대화/위반/텔레메트리 조회
+- [ ] [P1][@backend] E2E: 채팅 스트림 정상 + 정치 차단 경로 검증
+- [ ] [P2][@backend] 커버리지 80% 목표 달성(현재 핵심 테스트 중심)
+- [ ] [P1][@devops] ESLint/Prettier 설정 및 CI 파이프라인 연동
 
 ### 배포
-- [ ] Server: Render/AWS(ECS/Fargate) 도커 이미지/헬스체크
-- [ ] Web: Vercel 빌드 설정 및 환경변수 연결
-- [ ] DB: Neon/RDS 프로비저닝 가이드, 마이그레이션 파이프라인
-- [ ] CI/CD: Lint/Test/Build 워크플로우
+- [ ] [P1][@devops] Server: Render/AWS(ECS/Fargate) Docker 이미지/헬스체크
+- [ ] [P1][@devops] Web: Vercel 빌드/환경변수 연결
+- [ ] [P1][@db] DB: Neon/RDS 가이드 및 마이그레이션 파이프라인
+- [ ] [P1][@devops] CI/CD: Lint/Test/Build 워크플로우 구성
 
 ## 실행 체크리스트
 1) 의존성 설치: `pnpm i`
-2) 환경 변수를 `.env`에 설정: `API_KEY`, `MODEL_NAME`, `SERVER_URL`, `DB_URL`
+2) 환경 변수 설정: `.env` → `API_KEY`, `MODEL_NAME`, `SERVER_URL`, `DB_URL`, `EMBEDDING_MODEL`, `EMBEDDING_DIM`, `UPLOAD_DIR`
 3) DB 기동: `docker compose up -d`
-4) 마이그레이션: `pnpm db:migrate`
+4) 마이그레이션: `docker exec -i woo-chatbot-db-1 psql -U postgres -d woo -f - < packages/db/migrations/0001_init.sql`
 5) 개발 실행: `pnpm dev` (web 3000, server 3001)
 
 ## 참고
 - Adminer: http://localhost:8080 (DB 확인용)
-- 서버 API: `POST /chat/stream` (SSE)
+- 서버 API: `POST /chat/stream` (SSE), `POST /rag/upload`, `POST /rag/ingest`
 - 프록시: 웹 `/api/chat/route.ts` → 서버 `/chat/stream`
