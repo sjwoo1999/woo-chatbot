@@ -1,12 +1,17 @@
 import { ArgumentsHost, Catch, ExceptionFilter, ForbiddenException, HttpException } from '@nestjs/common';
+import { TelemetryService } from '../telemetry/telemetry.service';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
+  constructor(private readonly telemetry?: TelemetryService) {}
+
   catch(exception: unknown, host: ArgumentsHost) {
     const res = host.switchToHttp().getResponse();
 
     if (exception instanceof ForbiddenException) {
       const r = exception.getResponse();
+      // log safety block
+      this.telemetry?.logEvent('safety_block', { detail: r }).catch(() => {});
       res.status(403).json({ type: 'safety_error', detail: r });
       return;
     }
