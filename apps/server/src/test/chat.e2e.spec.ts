@@ -1,19 +1,24 @@
+import 'reflect-metadata';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../../src/modules/app.module';
+import { EmbedderOpenAI } from '../../src/rag/embedder.openai';
 
 let app: INestApplication;
 
 beforeAll(async () => {
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(EmbedderOpenAI)
+    .useValue({ embed: async (texts: string[]) => texts.map(() => Array(1536).fill(0.01)) })
+    .compile();
   app = moduleRef.createNestApplication();
   await app.init();
 });
 
 afterAll(async () => {
-  await app.close();
+  if (app) await app.close();
 });
 
 describe('/chat/stream E2E', () => {
@@ -31,7 +36,8 @@ describe('/chat/stream E2E', () => {
       });
 
     expect(res.status).toBe(200);
-    expect(res.text.includes('data:')).toBe(true);
+    const text = Buffer.isBuffer(res.body) ? res.body.toString() : (res.text || '');
+    expect(text.includes('data:')).toBe(true);
   });
 
   it('refuses politics per safety policy', async () => {
@@ -42,6 +48,7 @@ describe('/chat/stream E2E', () => {
       .send({ messages: [{ role: 'user', content: '대통령 선거 전략 알려줘' }] });
 
     expect(res.status).toBe(403);
-    expect(res.body?.type).toBe('safety_error');
+    expect(res.body?.reason).toBe('safety_block');
+    expect(Array.isArray(res.body?.categories)).toBe(true);
   });
 });
