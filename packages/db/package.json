@@ -1,0 +1,23 @@
+{
+  "name": "@woo/db",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "migrations"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "migrate": "drizzle-kit migrate",
+    "generate": "drizzle-kit generate:pg",
+    "dev": "tsup src/index.ts --watch"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.36.0",
+    "drizzle-kit": "^0.26.2",
+    "pg": "^8.11.5"
+  },
+  "devDependencies": {
+    "tsup": "^8.2.4",
+    "typescript": "^5.5.4"
+  }
+}

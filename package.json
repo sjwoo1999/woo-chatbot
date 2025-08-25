@@ -1,0 +1,16 @@
+{
+  "name": "woo-chatbot",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.7.0",
+  "scripts": {
+    "dev": "concurrently -k -n web,server -c auto \"pnpm --filter @woo/web dev\" \"pnpm --filter @woo/server start:dev\"",
+    "build": "pnpm -r build",
+    "db:migrate": "pnpm --filter @woo/db migrate",
+    "test": "pnpm -r test",
+    "e2e": "pnpm -r --filter @woo/web test:e2e"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
