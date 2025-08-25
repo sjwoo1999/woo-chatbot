@@ -60,9 +60,42 @@ export class RagRepository {
        WHERE c.deleted_at IS NULL AND d.deleted_at IS NULL
        ORDER BY c.embedding <=> $1::vector
        LIMIT $2`,
-      [vec, topK]
+      [vec, topK * 3]
     );
-    return rows;
+
+    // Simple keyword filter by title tags (if provided in meta/tags)
+    // For demo, we keep rows as-is. Real impl: filter rows by query tokens.
+
+    // MMR re-ranking (cosine-based, diversity by content Jaccard approximation)
+    const lambda = 0.7;
+    const selected: typeof rows = [];
+    const candidates = [...rows];
+
+    while (selected.length < Math.min(topK, candidates.length)) {
+      let bestIdx = 0;
+      let bestScore = -Infinity;
+      for (let i = 0; i < candidates.length; i++) {
+        const cand = candidates[i];
+        const relevance = Number(cand.score) || 0;
+        let diversityPenalty = 0;
+        for (const s of selected) {
+          const a = new Set(String(cand.content).split(/\W+/).slice(0, 50).map((x) => x.toLowerCase()));
+          const b = new Set(String(s.content).split(/\W+/).slice(0, 50).map((x) => x.toLowerCase()));
+          const inter = [...a].filter((x) => b.has(x)).length;
+          const union = new Set([...a, ...b]).size || 1;
+          const jaccard = inter / union;
+          diversityPenalty = Math.max(diversityPenalty, jaccard);
+        }
+        const mmr = lambda * relevance - (1 - lambda) * diversityPenalty;
+        if (mmr > bestScore) {
+          bestScore = mmr;
+          bestIdx = i;
+        }
+      }
+      selected.push(candidates.splice(bestIdx, 1)[0]);
+    }
+
+    return selected.slice(0, topK);
   }
 
   async getChunkById(id: string): Promise<{ id: string; document_id: string; chunk_index: number; content: string; title: string } | null> {
