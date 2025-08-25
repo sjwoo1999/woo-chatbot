@@ -46,8 +46,8 @@ pnpm dev
   - [x] 소프트 삭제(`deleted_at`) 컬럼 추가
 - [x] `apps/server`: SSE 스트리밍(`POST /chat/stream`), OpenAI Provider, Safety(Guard/ExceptionFilter)
 - [x] RAG 인제스트(최소 동작)
-  - [x] `POST /rag/upload`(.md/.txt 우선), `POST /rag/ingest`(본문 직접)
-  - [x] 청킹(800±200, overlap 100), OpenAI 임베딩 배치, 청크 upsert
+  - [x] `POST /rag/ingest`(본문 직접)
+  - [x] 청킹(토큰 기반 overlap), OpenAI 임베딩 배치, 청크 upsert
 - [x] 검색 + 프롬프트 합성(최소)
   - [x] `knowledgeBase` 토글 시 상위 청크 6개 검색 → `retrieved_knowledge` 섹션 주입
   - [x] 응답 스트림에 `sources` 도구 이벤트 포함
@@ -67,7 +67,6 @@ pnpm dev
 ### 기능/RAG
 - [ ] [P1][@backend] 쿼리 확장 규칙(동의어 확장) 고도화/옵션화
 - [ ] [P1][@backend] 하이브리드 검색 고도화(MMR, 태그/제목 필터)
-- [ ] [P1][@backend] 업로드 파서: `.pdf` 추출기 구현, 대용량 배치/리트라이
 
 ### 텔레메트리/보안
 - [ ] [P0][@backend] 요청-응답 미들웨어로 latency/차단/툴 사용 로깅
@@ -106,5 +105,86 @@ pnpm dev
 
 ## 참고
 - Adminer: http://localhost:8080 (DB 확인용)
-- 서버 API: `POST /chat/stream` (SSE), `POST /rag/upload`, `POST /rag/ingest`
+- 서버 API: `POST /chat/stream` (SSE), `POST /rag/ingest`
 - 프록시: 웹 `/api/chat/route.ts` → 서버 `/chat/stream`
+
+## 배포 & 실행 가이드
+
+### 환경 변수
+- 공통
+  - `API_KEY`: OpenAI API Key (server only 사용)
+  - `MODEL_NAME`: 기본 채팅 모델 (예: `gpt-4o-mini`)
+  - `DB_URL`: Postgres 연결 문자열 (예: `postgres://user:pass@host:5432/woo`)
+  - `EMBEDDING_MODEL`: 임베딩 모델 (예: `text-embedding-3-small`)
+  - `EMBEDDING_DIM`: 임베딩 차원 (예: `1536`)
+  - `SERVER_URL`: Web → Server 프록시 대상 (예: `http://localhost:3001` 또는 Render URL)
+
+- 웹(Next.js)
+  - `NEXT_PUBLIC_SERVER_URL`를 사용하려면 `apps/web/app/api/chat/route.ts`에서 참조하도록 변경 가능. 현재는 `SERVER_URL` 기본값 사용.
+
+### 로컬 개발
+```bash
+# 설치 및 DB 기동
+pnpm i
+docker compose up -d
+# 마이그레이션 적용
+docker exec -i woo-chatbot-db-1 psql -U postgres -d woo -f - < packages/db/migrations/0001_init.sql
+# 개발 서버 실행 (web:3000, server:3001)
+pnpm dev
+```
+
+### 테스트
+```bash
+# 서버 단위/E2E 테스트 실행
+pnpm --filter @woo/server test
+```
+
+### 데이터베이스 (Neon 또는 RDS)
+- Neon
+  - 프로젝트 생성 → Postgres DB 생성 → `DB_URL` 발급 → `.env` 업데이트 → 마이그레이션 적용(위 명령 대신 로컬에서 `psql`로 원격에 실행)
+- AWS RDS
+  - RDS PostgreSQL 인스턴스 생성 → SG/파이어월 허용 → `DB_URL` 구성 → 마이그레이션 적용
+
+### 서버 배포 (Render 권장)
+1) Render Dashboard → New → Web Service → GitHub repo 선택
+2) Runtime: Node 20, Build Command: `pnpm i --frozen-lockfile`, Start Command: `node dist/main.js`
+3) 서버 빌드 스텝
+   - 빌드 전: `pnpm -w i && pnpm --filter @woo/server build`
+   - Nest 빌드 산출물 `apps/server/dist`를 실행하도록 설정(Procfile 또는 Start Command 조정 필요)
+4) 환경 변수 설정
+   - `API_KEY`, `MODEL_NAME`, `DB_URL`, `EMBEDDING_MODEL`, `EMBEDDING_DIM`, `SERVER_URL`
+5) 헬스체크
+   - 간단한 `GET /rag/chunks/:id` 또는 `GET /` 핑 엔드포인트 추가를 권장(현재는 별도 헬스 엔드포인트 없음)
+
+참고: Render에서 Monorepo인 경우 Root Directory를 `apps/server`로 지정하거나, `Render Build Command`에서 workspace 설치 후 서버 빌드 스크립트를 호출하세요.
+
+### 웹 배포 (Vercel)
+1) Import Project → Monorepo에서 `apps/web` 경로 지정
+2) Build Command: `pnpm -w i && pnpm --filter @woo/web build`
+3) Output: Next.js 기본
+4) Env
+   - `SERVER_URL`를 서버 배포 주소로 설정 (예: `https://your-render-service.onrender.com`)
+5) 도메인 연결 및 배포 확인
+
+### CI/CD (GitHub Actions 개요)
+- 워크플로우 예시
+```yaml
+name: ci
+on: [push, pull_request]
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: 'pnpm' }
+      - run: pnpm i --frozen-lockfile
+      - run: pnpm --filter @woo/server test
+```
+
+### 운영 수칙
+- 안전 정책 위반(정치/위험/PII)은 서버 `SafetyGuard`에서 차단/마스킹 처리됨
+- 실제 키/민감정보는 절대 레포에 커밋하지 말 것
+- 트래픽 증가 시: Postgres 인덱스 파라미터(lists 등) 및 커넥션 풀, Render 인스턴스 스케일링 점검
